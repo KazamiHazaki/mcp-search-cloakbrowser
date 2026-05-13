@@ -178,8 +178,13 @@ def _mount_sse(app: FastAPI) -> None:
                 mcp._mcp_server.create_initialization_options(),
             )
 
+    async def handle_post_message(request):
+        await sse.handle_post_message(request.scope, request.receive, request._send)
+
+    # Use Starlette add_route (no FastAPI validation) for ASGI handlers
     app.add_route("/sse", handle_sse)
-    app.add_route("/messages/{session_id}", endpoint=sse.handle_post_message, methods=["POST"])
+    app.add_route("/messages/{session_id}", handle_post_message, methods=["POST"])
+
     logger.info("Mounted MCP SSE endpoint at /sse")
 
 
