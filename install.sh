@@ -138,6 +138,14 @@ setup_repo() {
 	# Ensure absolute path
 	INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
 	log_ok "Repository ready at $INSTALL_DIR"
+
+	# Verify required files exist
+	if [[ ! -f "$INSTALL_DIR/requirements.txt" ]]; then
+		log_error "requirements.txt missing after clone/update."
+		log_info "Contents of $INSTALL_DIR:"
+		ls -la "$INSTALL_DIR" || true
+		exit 1
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -146,8 +154,17 @@ setup_repo() {
 
 setup_venv() {
 	VENV_DIR="$INSTALL_DIR/.venv"
+	local req_file="$INSTALL_DIR/requirements.txt"
 
 	log_info "Creating virtual environment with Python $PYTHON_VERSION..."
+
+	# Safety: ensure requirements.txt exists
+	if [[ ! -f "$req_file" ]]; then
+		log_error "requirements.txt not found at $req_file"
+		log_info "Listing $INSTALL_DIR:"
+		ls -la "$INSTALL_DIR" || true
+		exit 1
+	fi
 
 	if [[ -d "$VENV_DIR" ]]; then
 		log_warn "Existing venv found. Reusing."
@@ -155,9 +172,8 @@ setup_venv() {
 		uv venv --python "$PYTHON_CMD" "$VENV_DIR"
 	fi
 
-	# cd to repo so uv resolves paths correctly
-	cd "$INSTALL_DIR"
-	uv pip install -r "requirements.txt" --python "$VENV_DIR/bin/python"
+	# Use absolute path so uv always finds it regardless of cwd
+	uv pip install -r "$req_file" --python "$VENV_DIR/bin/python"
 	log_ok "Dependencies installed in $VENV_DIR"
 }
 
