@@ -15,7 +15,7 @@
 
 set -euo pipefail
 
-REPO_URL="https://github.com/CloakHQ/cloakbrowser"
+REPO_URL="https://github.com/KazamiHazaki/mcp-search-cloakbrowser"
 INSTALL_DIR="${CLOAK_MCP_DIR:-$HOME/.cloakbrowser-mcp}"
 PYTHON_MIN="3.11"
 
@@ -195,25 +195,42 @@ create_wrappers() {
 	local bin_dir="$INSTALL_DIR/bin"
 	mkdir -p "$bin_dir"
 
-	cat > "$bin_dir/cloak-search" <<EOF
+	# Self-locating wrappers: detect project root from script location
+	# so they work even if the install directory is moved.
+	cat > "$bin_dir/cloak-search" <<'SCRIPT'
 #!/usr/bin/env bash
-source "$VENV_DIR/bin/activate"
-exec python "$INSTALL_DIR/mcp_server.py" "\$@"
-EOF
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="${PROJECT_ROOT}/.venv"
+if [[ -f "${VENV_DIR}/bin/activate" ]]; then
+    source "${VENV_DIR}/bin/activate"
+fi
+exec python "${PROJECT_ROOT}/mcp_server.py" "$@"
+SCRIPT
 	chmod +x "$bin_dir/cloak-search"
 
-	cat > "$bin_dir/cloak-search-http" <<EOF
+	cat > "$bin_dir/cloak-search-http" <<'SCRIPT'
 #!/usr/bin/env bash
-source "$VENV_DIR/bin/activate"
-exec python "$INSTALL_DIR/mcp_server.py" --http "\$@"
-EOF
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="${PROJECT_ROOT}/.venv"
+if [[ -f "${VENV_DIR}/bin/activate" ]]; then
+    source "${VENV_DIR}/bin/activate"
+fi
+exec python "${PROJECT_ROOT}/mcp_server.py" --http "$@"
+SCRIPT
 	chmod +x "$bin_dir/cloak-search-http"
 
-	cat > "$bin_dir/cloak-search-sse" <<EOF
+	cat > "$bin_dir/cloak-search-sse" <<'SCRIPT'
 #!/usr/bin/env bash
-source "$VENV_DIR/bin/activate"
-exec python "$INSTALL_DIR/mcp_server.py" --sse "\$@"
-EOF
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="${PROJECT_ROOT}/.venv"
+if [[ -f "${VENV_DIR}/bin/activate" ]]; then
+    source "${VENV_DIR}/bin/activate"
+fi
+exec python "${PROJECT_ROOT}/mcp_server.py" --sse "$@"
+SCRIPT
 	chmod +x "$bin_dir/cloak-search-sse"
 
 	log_ok "Wrapper scripts created in $bin_dir"

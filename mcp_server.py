@@ -188,21 +188,32 @@ def _mount_sse(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    import argparse
+    import os
     import uvicorn
 
-    args = sys.argv[1:]
+    # Parse CLI args
+    parser = argparse.ArgumentParser(description="CloakBrowser MCP Search & Scrape Server")
+    parser.add_argument("--http", action="store_true", help="Run HTTP server")
+    parser.add_argument("--sse", action="store_true", help="Run HTTP+SSE server")
+    parser.add_argument("--port", type=int, default=None, help="HTTP server port (default: env PORT or 8000)")
+    args = parser.parse_args()
 
-    if "--http" in args:
-        logger.info("Starting HTTP server on http://localhost:8000")
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    # Resolve port: CLI arg > env PORT > default 8000
+    port = args.port if args.port is not None else int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
 
-    elif "--sse" in args:
+    if args.http:
+        logger.info("Starting HTTP server on http://%s:%d", host, port)
+        uvicorn.run(app, host=host, port=port, log_level="info")
+
+    elif args.sse:
         _mount_sse(app)
-        logger.info("Starting HTTP+SSE server on http://localhost:8000")
-        logger.info("MCP SSE endpoint: http://localhost:8000/sse")
-        logger.info("HTTP search endpoint: http://localhost:8000/search")
-        logger.info("HTTP scrape endpoint: http://localhost:8000/scrape")
-        uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+        logger.info("Starting HTTP+SSE server on http://%s:%d", host, port)
+        logger.info("MCP SSE endpoint: http://%s:%d/sse", host, port)
+        logger.info("HTTP search endpoint: http://%s:%d/search", host, port)
+        logger.info("HTTP scrape endpoint: http://%s:%d/scrape", host, port)
+        uvicorn.run(app, host=host, port=port, log_level="info")
 
     else:
         # Default: stdio MCP server

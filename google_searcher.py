@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import urllib.parse
 from typing import Any
@@ -10,6 +11,10 @@ from typing import Any
 from selectolax.lexbor import LexborHTMLParser
 
 logger = logging.getLogger("google_searcher")
+
+# Configurable via environment variables
+SEARCH_TIMEOUT_MS = int(os.environ.get("CLOAK_SEARCH_TIMEOUT", "30000"))
+SEARCH_WAIT_SECS = float(os.environ.get("CLOAK_SEARCH_WAIT", "1.5"))
 
 
 def _clamp_limit(value: int) -> int:
@@ -184,9 +189,9 @@ def search_google(query: str, limit: int = 5, headless: bool = True) -> dict[str
 
         search_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(query)}"
         logger.info("Navigating to %s", search_url)
-        page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+        page.goto(search_url, wait_until="domcontentloaded", timeout=SEARCH_TIMEOUT_MS)
 
-        time.sleep(1.5)
+        time.sleep(SEARCH_WAIT_SECS)
 
         html = page.content()
 
@@ -225,7 +230,7 @@ def search_google(query: str, limit: int = 5, headless: bool = True) -> dict[str
                                     );
                         if (btn) btn.click();
                     """)
-                    time.sleep(2)
+                    time.sleep(SEARCH_WAIT_SECS)
                 except Exception as e:
                     logger.warning("JS consent click failed: %s", e)
 

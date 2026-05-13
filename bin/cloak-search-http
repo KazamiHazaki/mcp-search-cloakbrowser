@@ -1,3 +1,11 @@
 #!/usr/bin/env bash
-source "/Users/samuraiheart/work/cloackbrowser-mcp/.venv/bin/activate"
-exec python "/Users/samuraiheart/work/cloackbrowser-mcp/mcp_server.py" --http "$@"
+# Self-locating wrapper: works from any directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_DIR="${PROJECT_ROOT}/.venv"
+
+if [[ -f "${VENV_DIR}/bin/activate" ]]; then
+    source "${VENV_DIR}/bin/activate"
+fi
+
+exec python "${PROJECT_ROOT}/mcp_server.py" --http "$@"

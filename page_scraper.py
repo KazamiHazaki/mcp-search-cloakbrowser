@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import trafilatura
 from markdownify import markdownify as md
 
 logger = logging.getLogger("page_scraper")
+
+# Configurable via environment variables
+CACHE_TTL_SECONDS = int(os.environ.get("CLOAK_CACHE_TTL_SECONDS", str(24 * 60 * 60)))
+SCRAPE_TIMEOUT_MS = int(os.environ.get("CLOAK_SCRAPE_TIMEOUT", "30000"))
+SCRAPE_WAIT_SECS = float(os.environ.get("CLOAK_SCRAPE_WAIT", "1.5"))
 
 
 @dataclass
@@ -22,7 +28,6 @@ class _CacheEntry:
 
 # In-memory cache: url -> _CacheEntry
 _page_cache: dict[str, _CacheEntry] = {}
-CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 
 
 def _is_cached(url: str) -> bool:
@@ -121,8 +126,8 @@ def scrape_page(url: str, headless: bool = True, use_cache: bool = True) -> dict
         browser = launch(headless=headless)
         page = browser.new_page()
 
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        time.sleep(1.5)  # Let dynamic content settle
+        page.goto(url, wait_until="domcontentloaded", timeout=SCRAPE_TIMEOUT_MS)
+        time.sleep(SCRAPE_WAIT_SECS)  # Let dynamic content settle
 
         html = page.content()
         page_title = page.title()
