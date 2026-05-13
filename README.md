@@ -27,7 +27,7 @@ An **[MCP (Model Context Protocol)](https://modelcontextprotocol.io)** server po
 ./install.sh
 
 # Or download & run directly:
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KazamiHazaki/mcp-search-cloakbrowser/refs/heads/main/install.sh | bash
 ```
 
 This will:
