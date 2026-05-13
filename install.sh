@@ -75,6 +75,82 @@ find_python() {
 }
 
 # ---------------------------------------------------------------------------
+# Auto-install Python 3.11+ if not found
+# ---------------------------------------------------------------------------
+
+install_python() {
+	log_warn "Python $PYTHON_MIN+ not found. Attempting auto-install..."
+
+	# Try uv first (fastest, no build deps needed)
+	if command -v uv &>/dev/null; then
+		log_info "Using uv to install Python $PYTHON_MIN..."
+		uv python install "$PYTHON_MIN"
+		PYTHON_CMD="$(uv python find "$PYTHON_MIN")"
+		PYTHON_VERSION="$PYTHON_MIN"
+		log_ok "Python $PYTHON_MIN installed via uv: $PYTHON_CMD"
+		return 0
+	fi
+
+	# Try pyenv
+	if command -v pyenv &>/dev/null; then
+		log_info "Using pyenv to install Python $PYTHON_MIN..."
+		pyenv install "$PYTHON_MIN"
+		PYTHON_CMD="$(pyenv prefix "$PYTHON_MIN")/bin/python"
+		PYTHON_VERSION="$PYTHON_MIN"
+		log_ok "Python $PYTHON_MIN installed via pyenv: $PYTHON_CMD"
+		return 0
+	fi
+
+	# Try asdf
+	if command -v asdf &>/dev/null; then
+		log_info "Using asdf to install Python $PYTHON_MIN..."
+		asdf plugin add python 2>/dev/null || true
+		asdf install python "$PYTHON_MIN"
+		asdf global python "$PYTHON_MIN"
+		PYTHON_CMD="$(asdf where python "$PYTHON_MIN")/bin/python"
+		PYTHON_VERSION="$PYTHON_MIN"
+		log_ok "Python $PYTHON_MIN installed via asdf: $PYTHON_CMD"
+		return 0
+	fi
+
+	# Install pyenv if nothing else works
+	log_info "Installing pyenv..."
+	curl -fsSL https://pyenv.run | bash
+
+	# Add pyenv to PATH for this session
+	export PATH="$HOME/.pyenv/bin:$PATH"
+	eval "$(pyenv init -)"
+
+	# Install build deps based on OS
+	if [[ "$OS" == "macos" ]]; then
+		log_info "Installing macOS build dependencies (brew required)..."
+		brew install openssl readline sqlite3 xz zlib 2>/dev/null || true
+	elif [[ "$OS" == "linux" ]]; then
+		log_info "Installing Linux build dependencies (sudo required)..."
+		if command -v apt-get &>/dev/null; then
+			sudo apt-get update -qq
+			sudo apt-get install -y -qq make build-essential libssl-dev zlib1g-dev \
+				libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+				libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
+		elif command -v yum &>/dev/null; then
+			sudo yum groupinstall -y "Development Tools"
+			sudo yum install -y openssl-devel bzip2-devel libffi-devel zlib-devel readline-devel sqlite-devel
+		elif command -v pacman &>/dev/null; then
+			sudo pacman -S --needed base-devel openssl zlib xz 2>/dev/null || true
+		elif command -v apk &>/dev/null; then
+			sudo apk add --no-cache build-base openssl-dev bzip2-dev zlib-dev readline-dev sqlite-dev
+		fi
+	fi
+
+	log_info "Building Python $PYTHON_MIN from source (this may take a few minutes)..."
+	pyenv install "$PYTHON_MIN"
+	PYTHON_CMD="$(pyenv prefix "$PYTHON_MIN")/bin/python"
+	PYTHON_VERSION="$PYTHON_MIN"
+	log_ok "Python $PYTHON_MIN installed via pyenv: $PYTHON_CMD"
+	return 0
+}
+
+# ---------------------------------------------------------------------------
 # Install uv (fast Python package manager)
 # ---------------------------------------------------------------------------
 
@@ -286,17 +362,20 @@ main() {
 
 	# Check Python
 	if ! find_python; then
-		log_error "Python $PYTHON_MIN+ is required but not found."
-		log_info "Install Python 3.11+ via:"
-		log_info "  macOS:   brew install python@3.11"
-		log_info "  Ubuntu:  sudo apt install python3.11 python3.11-venv"
-		log_info "  Arch:    sudo pacman -S python"
-		log_info "  General: https://python.org/downloads"
-		exit 1
+		# Try to auto-install Python
+		if ! install_python; then
+			log_error "Failed to auto-install Python $PYTHON_MIN+."
+			log_info "Please install Python 3.11+ manually:"
+			log_info "  macOS:   brew install python@3.11"
+			log_info "  Ubuntu:  sudo apt install python3.11 python3.11-venv"
+			log_info "  Arch:    sudo pacman -S python"
+			log_info "  General: https://python.org/downloads"
+			exit 1
+		fi
 	fi
-	log_ok "Python found: $PYTHON_CMD (v$PYTHON_VERSION)"
+	log_ok "Python ready: $PYTHON_CMD (v$PYTHON_VERSION)"
 
-	# Install uv (optional but recommended)
+	# Install uv (optional but recommended) — do this AFTER we have Python
 	install_uv || true
 
 	# Setup repo
