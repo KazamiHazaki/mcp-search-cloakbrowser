@@ -9,8 +9,14 @@
 # venv uses that isolated Python — system Python stays untouched.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/install.sh | bash
-#   ./install.sh
+#   # Fresh install
+#   curl -fsSL https://raw.githubusercontent.com/KazamiHazaki/mcp-search-cloakbrowser/main/install.sh | bash
+#
+#   # Update existing installation
+#   curl -fsSL https://raw.githubusercontent.com/KazamiHazaki/mcp-search-cloakbrowser/main/install.sh | bash -s -- --update
+#
+#   # Force recreate everything (nuke venv + binary + pull latest)
+#   curl -fsSL .../install.sh | bash -s -- --force
 #
 
 set -euo pipefail
@@ -18,6 +24,32 @@ set -euo pipefail
 REPO_URL="https://github.com/KazamiHazaki/mcp-search-cloakbrowser"
 INSTALL_DIR="${CLOAK_MCP_DIR:-$HOME/.cloakbrowser-mcp}"
 PYTHON_MIN="3.11"
+
+# Parse flags
+FORCE=false
+UPDATE=false
+for arg in "$@"; do
+	case "$arg" in
+		--force)   FORCE=true ;;
+		--update)  UPDATE=true ;;
+		--help|-h)
+			cat <<'EOF'
+Usage: install.sh [OPTIONS]
+
+Options:
+  --update   Update existing installation (pull latest, update deps, recreate wrappers)
+  --force    Full reinstall: delete venv + binary cache, then install fresh
+  --help     Show this help
+
+Examples:
+  curl -fsSL .../install.sh | bash              # Fresh install
+  curl -fsSL .../install.sh | bash -s -- --update  # Update existing
+  ./install.sh --force                          # Force full reinstall
+EOF
+			exit 0
+			;;
+	esac
+done
 
 # Colors
 RED='\033[0;31m'
@@ -30,6 +62,20 @@ log_info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
+log_step()  { echo -e "${GREEN}▶${NC} $*"; }
+
+# Detect if this is a re-run on existing install
+IS_UPDATE=false
+if [[ -d "$INSTALL_DIR/.git" && -f "$INSTALL_DIR/mcp_server.py" ]]; then
+	IS_UPDATE=true
+fi
+
+# --update flag is implied when re-running on existing install
+if [[ "$IS_UPDATE" == true && "$FORCE" == false && "$UPDATE" == false ]]; then
+	log_info "Existing installation detected. Running in UPDATE mode."
+	log_info "Use --force for full reinstall, or --update to explicitly confirm."
+	UPDATE=true
+fi
 
 # ---------------------------------------------------------------------------
 # Detect platform
@@ -117,27 +163,71 @@ ensure_python() {
 }
 
 # ---------------------------------------------------------------------------
-# Setup repo (clone or use current directory)
+# Setup repo (clone, update, or use current directory)
 # ---------------------------------------------------------------------------
 
 setup_repo() {
+	# If running from inside the repo, use current directory
 	if [[ -f "$(pwd)/mcp_server.py" && -f "$(pwd)/requirements.txt" ]]; then
 		INSTALL_DIR="$(cd "$(pwd)" && pwd)"
 		log_info "Using current directory as install path: $INSTALL_DIR"
 		return 0
 	fi
 
+	# Force mode: wipe and clone fresh
+	if [[ "$FORCE" == true && -d "$INSTALL_DIR" ]]; then
+		log_warn "--force: removing existing install dir $INSTALL_DIR"
+		rm -rf "$INSTALL_DIR"
+	fi
+
 	if [[ -d "$INSTALL_DIR/.git" ]]; then
-		log_info "Updating existing repository..."
-		(cd "$INSTALL_DIR" && git pull --ff-only)
+		log_info "Pulling latest code..."
+		cd "$INSTALL_DIR"
+
+		# Ensure we have a remote that matches REPO_URL
+		local current_origin
+		current_origin=$(git remote get-url origin 2>/dev/null || echo "")
+		if [[ "$current_origin" != "$REPO_URL" && "$current_origin" != "${REPO_URL}.git" ]]; then
+			log_warn "Remote URL mismatch. Resetting origin to $REPO_URL"
+			git remote remove origin 2>/dev/null || true
+			git remote add origin "$REPO_URL"
+		fi
+
+		# Ensure tracking branch exists
+		local current_branch
+		current_branch=$(git branch --show-current 2>/dev/null || echo "main")
+		if ! git rev-parse --abbrev-ref "@{upstream}" &>/dev/null; then
+			log_info "Setting up tracking branch for $current_branch..."
+			git branch -u "origin/$current_branch" "$current_branch" 2>/dev/null || true
+		fi
+
+		# Stash any local changes before pulling
+		if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+			log_warn "Local changes detected, stashing before pull..."
+			git stash push -m "install.sh auto-stash $(date +%Y%m%d_%H%M%S)"
+		fi
+
+		# Fetch and pull
+		git fetch origin --depth=1 "$current_branch" || {
+			log_error "git fetch failed. Check network or repo URL."
+			exit 1
+		}
+		git pull --ff-only origin "$current_branch" || {
+			log_error "git pull failed. Resolve conflicts manually in $INSTALL_DIR"
+			exit 1
+		}
+		cd - >/dev/null
+		log_ok "Repository updated to latest"
 	else
 		log_info "Cloning repository to $INSTALL_DIR ..."
 		rm -rf "$INSTALL_DIR"
 		git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+		log_ok "Repository cloned"
 	fi
+
 	# Ensure absolute path
 	INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
-	log_ok "Repository ready at $INSTALL_DIR"
+	log_info "Install path: $INSTALL_DIR"
 
 	# Verify required files exist
 	if [[ ! -f "$INSTALL_DIR/requirements.txt" ]]; then
@@ -156,8 +246,6 @@ setup_venv() {
 	VENV_DIR="$INSTALL_DIR/.venv"
 	local req_file="$INSTALL_DIR/requirements.txt"
 
-	log_info "Creating virtual environment with Python $PYTHON_VERSION..."
-
 	# Safety: ensure requirements.txt exists
 	if [[ ! -f "$req_file" ]]; then
 		log_error "requirements.txt not found at $req_file"
@@ -166,15 +254,27 @@ setup_venv() {
 		exit 1
 	fi
 
-	if [[ -d "$VENV_DIR" ]]; then
-		log_warn "Existing venv found. Reusing."
-	else
-		uv venv --python "$PYTHON_CMD" "$VENV_DIR"
+	if [[ "$FORCE" == true && -d "$VENV_DIR" ]]; then
+		log_warn "--force: removing existing venv..."
+		rm -rf "$VENV_DIR"
 	fi
 
-	# Use absolute path so uv always finds it regardless of cwd
-	uv pip install -r "$req_file" --python "$VENV_DIR/bin/python"
-	log_ok "Dependencies installed in $VENV_DIR"
+	if [[ -d "$VENV_DIR" ]]; then
+		if [[ "$UPDATE" == true ]]; then
+			log_info "Updating dependencies in existing venv..."
+			uv pip install -r "$req_file" --python "$VENV_DIR/bin/python" --upgrade
+			log_ok "Dependencies updated in $VENV_DIR"
+		else
+			log_warn "Existing venv found. Reusing."
+			uv pip install -r "$req_file" --python "$VENV_DIR/bin/python"
+			log_ok "Dependencies installed in $VENV_DIR"
+		fi
+	else
+		log_info "Creating virtual environment with Python $PYTHON_VERSION..."
+		uv venv --python "$PYTHON_CMD" "$VENV_DIR"
+		uv pip install -r "$req_file" --python "$VENV_DIR/bin/python"
+		log_ok "Dependencies installed in $VENV_DIR"
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -182,7 +282,12 @@ setup_venv() {
 # ---------------------------------------------------------------------------
 
 download_binary() {
-	log_info "Downloading CloakBrowser stealth Chromium binary (first run)..."
+	if [[ "$FORCE" == true && -d "$HOME/.cloakbrowser" ]]; then
+		log_warn "--force: clearing binary cache..."
+		rm -rf "$HOME/.cloakbrowser"
+	fi
+
+	log_info "Ensuring CloakBrowser stealth Chromium binary..."
 	"$VENV_DIR/bin/python" -m cloakbrowser install
 	log_ok "Binary ready"
 }
@@ -309,12 +414,44 @@ print_usage() {
 }
 
 # ---------------------------------------------------------------------------
+# Print update summary
+# ---------------------------------------------------------------------------
+
+print_update_summary() {
+	echo ""
+	echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+	echo -e "${GREEN}  Update Complete! 🔄${NC}"
+	echo -e "${GREEN}═══════════════════════════════════════════════════════════════${NC}"
+	echo ""
+	echo -e "${BLUE}What was updated:${NC}"
+	echo "  ✓ Latest code pulled from $REPO_URL"
+	echo "  ✓ Python dependencies refreshed"
+	echo "  ✓ Wrapper scripts regenerated"
+	echo "  ✓ CloakBrowser binary verified"
+	echo ""
+	echo -e "${BLUE}Restart your servers:${NC}"
+	echo "  # Kill old processes"
+	echo "  lsof -ti:8000 | xargs kill -9 2>/dev/null || true"
+	echo ""
+	echo "  # Restart in your preferred mode"
+	echo "  $INSTALL_DIR/bin/cloak-search       # MCP stdio"
+	echo "  $INSTALL_DIR/bin/cloak-search-http  # HTTP API"
+	echo "  $INSTALL_DIR/bin/cloak-search-sse   # HTTP + SSE"
+	echo ""
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 main() {
 	echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
 	echo -e "${GREEN}║  CloakBrowser MCP Server — Universal Installer               ║${NC}"
+	if [[ "$UPDATE" == true ]]; then
+		echo -e "${GREEN}║  UPDATE MODE — Pulling latest, refreshing deps               ║${NC}"
+	elif [[ "$FORCE" == true ]]; then
+		echo -e "${GREEN}║  FORCE MODE — Full reinstall (nuking old venv + cache)       ║${NC}"
+	fi
 	echo -e "${GREEN}║  (System Python is NEVER touched)                            ║${NC}"
 	echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
 	echo ""
@@ -327,27 +464,31 @@ main() {
 	# Step 2: Get Python 3.11+ (system or uv-downloaded — never modifies system)
 	ensure_python
 
-	# Step 3: Setup repo
+	# Step 3: Setup repo (clone or pull latest)
 	setup_repo
 
-	# Step 4: Create venv and install deps
+	# Step 4: Create/update venv and install deps
 	setup_venv
 
-	# Step 5: Download CloakBrowser binary
+	# Step 5: Download/update CloakBrowser binary
 	download_binary
 
 	# Step 6: macOS fix
 	fix_macos_gatekeeper
 
-	# Step 7: Wrapper scripts
+	# Step 7: Wrapper scripts (always regenerate in case paths changed)
 	create_wrappers
 
 	# Output
-	print_mcp_config
-	print_usage
+	if [[ "$UPDATE" == true ]]; then
+		print_update_summary
+	else
+		print_mcp_config
+		print_usage
+		echo -e "${GREEN}All set! 🚀${NC}"
+		echo ""
+	fi
 
-	echo -e "${GREEN}All set! 🚀${NC}"
-	echo ""
 	log_info "Your system Python was NOT modified."
 	log_info "Python $PYTHON_VERSION is isolated in the virtual environment."
 }
