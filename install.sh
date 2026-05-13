@@ -3,11 +3,13 @@
 # CloakBrowser MCP Server — Universal Installer
 # Works on: macOS (Intel/Apple Silicon), Linux (x64/arm64), WSL
 #
-# Usage:
-#   # From a fresh machine (clones repo):
-#   curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/install.sh | bash
+# KEY DESIGN: NEVER touches system Python.
+# Uses `uv` standalone installer (no Python required).
+# `uv python install` downloads prebuilt Python to ~/.local/share/uv/python/
+# venv uses that isolated Python — system Python stays untouched.
 #
-#   # From inside the repo (local install):
+# Usage:
+#   curl -fsSL https://raw.githubusercontent.com/YOUR_REPO/main/install.sh | bash
 #   ./install.sh
 #
 
@@ -22,7 +24,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 log_info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
 log_ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
@@ -55,115 +57,19 @@ detect_platform() {
 }
 
 # ---------------------------------------------------------------------------
-# Check / find Python
+# Ensure uv is installed (standalone — does NOT need Python)
 # ---------------------------------------------------------------------------
 
-find_python() {
-	local candidates=("python3.13" "python3.12" "python3.11" "python3" "python")
-	for cmd in "${candidates[@]}"; do
-		if command -v "$cmd" &>/dev/null; then
-			local version
-			version=$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
-			if [[ "$(printf '%s\n' "$PYTHON_MIN" "$version" | sort -V | head -n1)" == "$PYTHON_MIN" ]]; then
-				PYTHON_CMD="$cmd"
-				PYTHON_VERSION="$version"
-				return 0
-			fi
-		fi
-	done
-	return 1
-}
-
-# ---------------------------------------------------------------------------
-# Auto-install Python 3.11+ if not found
-# ---------------------------------------------------------------------------
-
-install_python() {
-	log_warn "Python $PYTHON_MIN+ not found. Attempting auto-install..."
-
-	# Try uv first (fastest, no build deps needed)
-	if command -v uv &>/dev/null; then
-		log_info "Using uv to install Python $PYTHON_MIN..."
-		uv python install "$PYTHON_MIN"
-		PYTHON_CMD="$(uv python find "$PYTHON_MIN")"
-		PYTHON_VERSION="$PYTHON_MIN"
-		log_ok "Python $PYTHON_MIN installed via uv: $PYTHON_CMD"
-		return 0
-	fi
-
-	# Try pyenv
-	if command -v pyenv &>/dev/null; then
-		log_info "Using pyenv to install Python $PYTHON_MIN..."
-		pyenv install "$PYTHON_MIN"
-		PYTHON_CMD="$(pyenv prefix "$PYTHON_MIN")/bin/python"
-		PYTHON_VERSION="$PYTHON_MIN"
-		log_ok "Python $PYTHON_MIN installed via pyenv: $PYTHON_CMD"
-		return 0
-	fi
-
-	# Try asdf
-	if command -v asdf &>/dev/null; then
-		log_info "Using asdf to install Python $PYTHON_MIN..."
-		asdf plugin add python 2>/dev/null || true
-		asdf install python "$PYTHON_MIN"
-		asdf global python "$PYTHON_MIN"
-		PYTHON_CMD="$(asdf where python "$PYTHON_MIN")/bin/python"
-		PYTHON_VERSION="$PYTHON_MIN"
-		log_ok "Python $PYTHON_MIN installed via asdf: $PYTHON_CMD"
-		return 0
-	fi
-
-	# Install pyenv if nothing else works
-	log_info "Installing pyenv..."
-	curl -fsSL https://pyenv.run | bash
-
-	# Add pyenv to PATH for this session
-	export PATH="$HOME/.pyenv/bin:$PATH"
-	eval "$(pyenv init -)"
-
-	# Install build deps based on OS
-	if [[ "$OS" == "macos" ]]; then
-		log_info "Installing macOS build dependencies (brew required)..."
-		brew install openssl readline sqlite3 xz zlib 2>/dev/null || true
-	elif [[ "$OS" == "linux" ]]; then
-		log_info "Installing Linux build dependencies (sudo required)..."
-		if command -v apt-get &>/dev/null; then
-			sudo apt-get update -qq
-			sudo apt-get install -y -qq make build-essential libssl-dev zlib1g-dev \
-				libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
-				libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev
-		elif command -v yum &>/dev/null; then
-			sudo yum groupinstall -y "Development Tools"
-			sudo yum install -y openssl-devel bzip2-devel libffi-devel zlib-devel readline-devel sqlite-devel
-		elif command -v pacman &>/dev/null; then
-			sudo pacman -S --needed base-devel openssl zlib xz 2>/dev/null || true
-		elif command -v apk &>/dev/null; then
-			sudo apk add --no-cache build-base openssl-dev bzip2-dev zlib-dev readline-dev sqlite-dev
-		fi
-	fi
-
-	log_info "Building Python $PYTHON_MIN from source (this may take a few minutes)..."
-	pyenv install "$PYTHON_MIN"
-	PYTHON_CMD="$(pyenv prefix "$PYTHON_MIN")/bin/python"
-	PYTHON_VERSION="$PYTHON_MIN"
-	log_ok "Python $PYTHON_MIN installed via pyenv: $PYTHON_CMD"
-	return 0
-}
-
-# ---------------------------------------------------------------------------
-# Install uv (fast Python package manager)
-# ---------------------------------------------------------------------------
-
-install_uv() {
+ensure_uv() {
 	if command -v uv &>/dev/null; then
 		log_ok "uv already installed: $(uv --version)"
 		return 0
 	fi
 
-	log_info "Installing uv (fast Python package manager)..."
+	log_info "Installing uv (standalone, no Python required)..."
 	curl -fsSL https://astral.sh/uv/install.sh | bash
 
-	# Source uv if installed to common locations
+	# Source into current shell
 	for uv_path in "$HOME/.local/bin/uv" "$HOME/.cargo/bin/uv"; do
 		if [[ -x "$uv_path" ]]; then
 			export PATH="$(dirname "$uv_path"):$PATH"
@@ -172,12 +78,42 @@ install_uv() {
 	done
 
 	if ! command -v uv &>/dev/null; then
-		log_warn "uv not found in PATH after install. Falling back to pip."
-		return 1
+		log_error "uv installation failed. Please install manually: https://docs.astral.sh/uv/getting-started/installation/"
+		exit 1
 	fi
 
 	log_ok "uv installed: $(uv --version)"
-	return 0
+}
+
+# ---------------------------------------------------------------------------
+# Ensure Python 3.11+ via uv (downloads prebuilt binary, never touches system)
+# ---------------------------------------------------------------------------
+
+ensure_python() {
+	log_info "Ensuring Python $PYTHON_MIN+ is available..."
+
+	# Try to find system Python 3.11+ first
+	local candidates=("python3.13" "python3.12" "python3.11")
+	for cmd in "${candidates[@]}"; do
+		if command -v "$cmd" &>/dev/null; then
+			local version
+			version=$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "0.0")
+			if [[ "$(printf '%s\n' "$PYTHON_MIN" "$version" | sort -V | head -n1)" == "$PYTHON_MIN" ]]; then
+				PYTHON_CMD="$cmd"
+				PYTHON_VERSION="$version"
+				log_ok "Using system Python: $PYTHON_CMD (v$PYTHON_VERSION)"
+				return 0
+			fi
+		fi
+	done
+
+	# System too old — download fresh Python via uv (isolated, no system impact)
+	log_warn "System Python is too old (< $PYTHON_MIN)."
+	log_info "Downloading prebuilt Python $PYTHON_MIN via uv (isolated, no system changes)..."
+	uv python install "$PYTHON_MIN"
+	PYTHON_CMD="$(uv python find "$PYTHON_MIN")"
+	PYTHON_VERSION="$PYTHON_MIN"
+	log_ok "Isolated Python ready: $PYTHON_CMD (v$PYTHON_VERSION)"
 }
 
 # ---------------------------------------------------------------------------
@@ -185,14 +121,12 @@ install_uv() {
 # ---------------------------------------------------------------------------
 
 setup_repo() {
-	# Check if we're already inside a repo with the required files
 	if [[ -f "$(pwd)/mcp_server.py" && -f "$(pwd)/requirements.txt" ]]; then
 		INSTALL_DIR="$(pwd)"
 		log_info "Using current directory as install path: $INSTALL_DIR"
 		return 0
 	fi
 
-	# Otherwise clone from remote
 	if [[ -d "$INSTALL_DIR/.git" ]]; then
 		log_info "Updating existing repository..."
 		(cd "$INSTALL_DIR" && git pull --ff-only)
@@ -213,24 +147,13 @@ setup_venv() {
 
 	log_info "Creating virtual environment with Python $PYTHON_VERSION..."
 
-	if command -v uv &>/dev/null; then
-		if [[ -d "$VENV_DIR" ]]; then
-			log_warn "Existing venv found. Reusing (use --clear to replace)."
-			uv pip install -r "$INSTALL_DIR/requirements.txt" --python "$VENV_DIR/bin/python"
-		else
-			uv venv --python "$PYTHON_CMD" "$VENV_DIR"
-			uv pip install -r "$INSTALL_DIR/requirements.txt" --python "$VENV_DIR/bin/python"
-		fi
+	if [[ -d "$VENV_DIR" ]]; then
+		log_warn "Existing venv found. Reusing."
 	else
-		if [[ -d "$VENV_DIR" ]]; then
-			log_warn "Existing venv found. Reusing."
-		else
-			"$PYTHON_CMD" -m venv "$VENV_DIR"
-		fi
-		"$VENV_DIR/bin/pip" install --upgrade pip
-		"$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+		uv venv --python "$PYTHON_CMD" "$VENV_DIR"
 	fi
 
+	uv pip install -r "$INSTALL_DIR/requirements.txt" --python "$VENV_DIR/bin/python"
 	log_ok "Dependencies installed in $VENV_DIR"
 }
 
@@ -355,42 +278,31 @@ print_usage() {
 main() {
 	echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════╗${NC}"
 	echo -e "${GREEN}║  CloakBrowser MCP Server — Universal Installer               ║${NC}"
+	echo -e "${GREEN}║  (System Python is NEVER touched)                            ║${NC}"
 	echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════╝${NC}"
 	echo ""
 
 	detect_platform
 
-	# Check Python
-	if ! find_python; then
-		# Try to auto-install Python
-		if ! install_python; then
-			log_error "Failed to auto-install Python $PYTHON_MIN+."
-			log_info "Please install Python 3.11+ manually:"
-			log_info "  macOS:   brew install python@3.11"
-			log_info "  Ubuntu:  sudo apt install python3.11 python3.11-venv"
-			log_info "  Arch:    sudo pacman -S python"
-			log_info "  General: https://python.org/downloads"
-			exit 1
-		fi
-	fi
-	log_ok "Python ready: $PYTHON_CMD (v$PYTHON_VERSION)"
+	# Step 1: Install uv (standalone — needs nothing from the system)
+	ensure_uv
 
-	# Install uv (optional but recommended) — do this AFTER we have Python
-	install_uv || true
+	# Step 2: Get Python 3.11+ (system or uv-downloaded — never modifies system)
+	ensure_python
 
-	# Setup repo
+	# Step 3: Setup repo
 	setup_repo
 
-	# Install deps
+	# Step 4: Create venv and install deps
 	setup_venv
 
-	# Download binary
+	# Step 5: Download CloakBrowser binary
 	download_binary
 
-	# macOS fix
+	# Step 6: macOS fix
 	fix_macos_gatekeeper
 
-	# Wrapper scripts
+	# Step 7: Wrapper scripts
 	create_wrappers
 
 	# Output
@@ -398,6 +310,9 @@ main() {
 	print_usage
 
 	echo -e "${GREEN}All set! 🚀${NC}"
+	echo ""
+	log_info "Your system Python was NOT modified."
+	log_info "Python $PYTHON_VERSION is isolated in the virtual environment."
 }
 
 main "$@"
