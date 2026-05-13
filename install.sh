@@ -122,7 +122,7 @@ ensure_python() {
 
 setup_repo() {
 	if [[ -f "$(pwd)/mcp_server.py" && -f "$(pwd)/requirements.txt" ]]; then
-		INSTALL_DIR="$(pwd)"
+		INSTALL_DIR="$(cd "$(pwd)" && pwd)"
 		log_info "Using current directory as install path: $INSTALL_DIR"
 		return 0
 	fi
@@ -135,6 +135,8 @@ setup_repo() {
 		rm -rf "$INSTALL_DIR"
 		git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
 	fi
+	# Ensure absolute path
+	INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd)"
 	log_ok "Repository ready at $INSTALL_DIR"
 }
 
@@ -153,7 +155,9 @@ setup_venv() {
 		uv venv --python "$PYTHON_CMD" "$VENV_DIR"
 	fi
 
-	uv pip install -r "$INSTALL_DIR/requirements.txt" --python "$VENV_DIR/bin/python"
+	# cd to repo so uv resolves paths correctly
+	cd "$INSTALL_DIR"
+	uv pip install -r "requirements.txt" --python "$VENV_DIR/bin/python"
 	log_ok "Dependencies installed in $VENV_DIR"
 }
 
