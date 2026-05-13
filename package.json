@@ -1,0 +1,30 @@
+{
+	"name": "cloakbrowser-mcp-server",
+	"version": "1.0.0",
+	"description": "MCP server for Google Search and Page Scraping via CloakBrowser stealth Chromium",
+	"bin": {
+		"cloak-search": "./bin/cloak-search",
+		"cloak-search-http": "./bin/cloak-search-http",
+		"cloak-search-sse": "./bin/cloak-search-sse"
+	},
+	"scripts": {
+		"install": "bash install.sh",
+		"start": "python mcp_server.py --http",
+		"start:mcp": "python mcp_server.py",
+		"start:sse": "python mcp_server.py --sse"
+	},
+	"keywords": [
+		"mcp",
+		"claude",
+		"google-search",
+		"web-scraping",
+		"stealth-browser",
+		"cloakbrowser",
+		"playwright",
+		"automation"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": ">=18.0.0"
+	}
+}

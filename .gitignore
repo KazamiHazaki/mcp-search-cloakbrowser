@@ -1,0 +1,45 @@
+# CloakBrowser MCP Server — .gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+
+# CloakBrowser binary cache (downloaded on first run)
+~/.cloakbrowser/
+.cloakbrowser/
+
+# CloakBrowser source (cloned separately, not part of this repo)
+cloakbrowser/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp
+/tmp/
+*.pid
+
+# Workspace artifacts (not part of this project)
+.agents/
+_bmad/
+_bmad-output/

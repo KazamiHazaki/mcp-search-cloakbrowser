@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+source "/Users/samuraiheart/work/cloackbrowser-mcp/.venv/bin/activate"
+exec python "/Users/samuraiheart/work/cloackbrowser-mcp/mcp_server.py" --sse "$@"

@@ -1,0 +1,19 @@
+# CloakBrowser MCP Google Search Server
+# Python 3.11+ recommended (mcp SDK requires >=3.10)
+
+# Core stealth browser (from PyPI)
+cloakbrowser>=0.3.28
+
+# MCP protocol server
+mcp>=1.0
+
+# HTTP server
+fastapi>=0.100
+uvicorn>=0.25
+
+# Fast HTML parsing
+selectolax>=0.3
+
+# Page content extraction
+trafilatura>=2.0
+markdownify>=0.11
